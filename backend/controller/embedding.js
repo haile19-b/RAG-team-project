@@ -3,32 +3,27 @@ import { Data } from "../model/data.model.js";
 import { searchSimilarData } from "../Functions/searchSimilarData.js";
 import { askGemini } from "../Functions/askForLastResponse.js";
 import { ChunkFile } from "../Functions/askForChunking.js";
+import { getTitle } from "../Functions/askForTitle.js";
+import { getCohereEmbedding } from "../Functions/cohere/askForChunking.js";
 
 const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
-export const embedData = async (req,res)=>{
+export const embedData = async (req, res) => {
+    const { My_Data } = req.body;
 
-    const {My_Data} = req.body;
-
-    if(!My_Data){
+    if (!My_Data) {
         return res.status(400).json({
-            message:"data is required !",
-            success:false
-        })
+            message: "Data is required!",
+            success: false
+        });
     }
 
     try {
-        // here I'm trying to I'm trying to prevent the dubilication of the data and this can help in improving performance !
+        // 1. First, get existing titles from database
+        const existingTitles = await Data.distinct("metadata.title");
 
-        // const storedData = await Data.findOne({text:My_Data})
-        // if(storedData){
-        //     return res.status(400).json({
-        //         message:"the same data stored on the database!",
-        //         success:false
-        //     })
-        // }
-
-        const chunks = await ChunkFile(My_Data)
+        // 2. Chunk the data
+        const chunks = await ChunkFile(existingTitles, My_Data);
 
         if (chunks.error) {
             return res.status(400).json({
@@ -38,74 +33,86 @@ export const embedData = async (req,res)=>{
         }
 
         if (!chunks || chunks.length === 0) {
-    return res.status(400).json({
-        message: "No chunked data returned!",
-        status: false
-    });
-}
-
-const embededChunks = await Promise.all(
-    chunks.map(async (chunk) => {
-        try {
-            const embeddingRes = await client.embed({
-                input: chunk.chunk,
-                model: "voyage-3-lite"
+            return res.status(400).json({
+                message: "No chunked data returned!",
+                status: false
             });
-
-            // ✅ ADD: Validate embedding response
-            if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
-                console.error("Invalid embedding response for chunk:", chunk.metadata.title);
-                return null;
-            }
-
-            return {
-                content: chunk.chunk,
-                metadata: chunk.metadata,
-                embedding: embeddingRes.data[0].embedding
-            };
-        } catch (embedError) {
-            console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
-            return null;
         }
-    })
-);
 
-const successfulEmbeddings = embededChunks.filter(chunk => chunk !== null);
+        // 3. Generate embeddings for chunks
+        const embededChunks = await Promise.all(
+            chunks.map(async (chunk,index) => {
+                try {
+                    if (index > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1000)); // 100ms delay
+                    }
+                    const embeddingRes = await client.embed({
+                        input: chunk.chunk,
+                        model: "voyage-3-lite"
+                    });
 
-if (successfulEmbeddings.length === 0) {
-    return res.status(500).json({
-        message: "All embedding operations failed",
-        status: false
-    });
-}
+                    if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
+                        console.error("Invalid embedding response for chunk:", chunk.metadata.title);
+                        return null;
+                    }
 
+                    return {
+                        content: chunk.chunk,
+                        metadata: chunk.metadata,
+                        embedding: embeddingRes.data[0].embedding
+                    };
+                } catch (embedError) {
+                    console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
+                    return null;
+                }
+            })
+        );
 
-const documents = successfulEmbeddings.map((chunk)=>({
-    content:chunk.content,
-    metadata:chunk.metadata,
-    embedding:chunk.embedding
-}))
+        const successfulEmbeddings = embededChunks.filter(chunk => chunk !== null);
 
-const bulkResult = await Data.insertMany(documents);
+        if (successfulEmbeddings.length === 0) {
+            return res.status(500).json({
+                message: "All embedding operations failed",
+                status: false
+            });
+        }
 
-return res.json({
-    message: "Chunks successfully processed and stored",
-    summary: {
-        totalReceived: chunks.length,
-        successfullyEmbedded: successfulEmbeddings.length,
-        successfullyStored: bulkResult.insertedCount,
-        failures: chunks.length - successfulEmbeddings.length
-    },
-});
+        // 4. Prepare documents for database insertion
+        const documents = successfulEmbeddings.map((chunk) => {
+            return {
+                content: chunk.content,
+                metadata: chunk.metadata,
+                embedding: chunk.embedding,
+            };
+        });
+
+        // 5. Insert into database
+        const bulkResult = await Data.insertMany(documents);
+
+        // 6. Get updated titles list from database
+        const updatedTitles = await Data.distinct("metadata.title");
+
+        return res.status(201).json({
+            message: "Data successfully embedded and stored",
+            summary: {
+                totalReceived: chunks.length,
+                successfullyEmbedded: successfulEmbeddings.length,
+                successfullyStored: bulkResult.insertedCount,
+                failures: chunks.length - successfulEmbeddings.length,
+                totalTitlesInDB: updatedTitles.length
+            },
+            titles: updatedTitles
+        });
 
     } catch (error) {
+        console.error("Server error in embedData:", error);
         return res.status(500).json({
-            message:"server error",
-            error:error.message,
-            success:false
-        })
+            message: "Server error",
+            error: error.message,
+            success: false
+        });
     }
-}
+};
 
 export const getReleventData = async(req,res) => {
 
@@ -117,17 +124,32 @@ export const getReleventData = async(req,res) => {
         })
     }
 
+    
+
     try {
-        const embedResponse = await client.embed({
-            input:[text],
-            model:'voyage-3'
-        })
 
-        const embededText = embedResponse.data[0].embedding;
+        const existingTitles = await Data.distinct("metadata.title");
 
-        const relevantData = await searchSimilarData(embededText);
 
-        const textForm = relevantData.map(data => data.text).join("\n");
+        const title = await getTitle(existingTitles,text)
+
+        const co = await getCohereEmbedding(text)
+
+
+        // const embedResponse = await client.embed({
+        //     input:[text],
+        //     model:'voyage-3-lite'
+        // })
+
+        // const embededText = embedResponse.data[0].embedding;
+        const embededText = co[0];
+
+        
+        const relevantData = await searchSimilarData(title,embededText);
+
+        const textForm = relevantData.map(data => data.content).join("\n");
+
+        return res.json({relevantData})
 
         const AiResponse = await askGemini(text,textForm)
 
@@ -136,14 +158,6 @@ export const getReleventData = async(req,res) => {
             userInput:text,
             aiResponse:AiResponse
         })
-
-        // return res.status(200).json({
-        //     message:"relevent data successfully filtered!",
-        //     data:relevantData,
-        //     combinedText:textForm
-        // })
-
-        
 
     } catch (error) {
         return res.status(500).json({

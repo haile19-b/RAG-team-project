@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export const ChunkFile = async(existingTitles=["excutive info","History"],newFileText) => {
+export const ChunkFile = async(existingTitles,newFileText) => {
 
     const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
