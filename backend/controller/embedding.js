@@ -4,7 +4,7 @@ import { searchSimilarData } from "../Functions/searchSimilarData.js";
 import { askGemini } from "../Functions/askForLastResponse.js";
 import { ChunkFile } from "../Functions/askForChunking.js";
 import { getTitle } from "../Functions/askForTitle.js";
-import { getCohereEmbedding } from "../Functions/cohere/askForChunking.js";
+import { getCohereEmbedding } from "../Functions/cohere/askForEmbedding.js";
 
 const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
@@ -43,15 +43,15 @@ export const embedData = async (req, res) => {
         const embededChunks = await Promise.all(
             chunks.map(async (chunk,index) => {
                 try {
-                    if (index > 0) {
-                        await new Promise(resolve => setTimeout(resolve, 1000)); // 100ms delay
-                    }
-                    const embeddingRes = await client.embed({
-                        input: chunk.chunk,
-                        model: "voyage-3-lite"
-                    });
+                    
+                    const embeddingRes = await getCohereEmbedding(chunk.chunk)
 
-                    if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
+                    // if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
+                    //     console.error("Invalid embedding response for chunk:", chunk.metadata.title);
+                    //     return null;
+                    // }
+
+                    if (!embeddingRes || !embeddingRes[0] ) {
                         console.error("Invalid embedding response for chunk:", chunk.metadata.title);
                         return null;
                     }
@@ -59,7 +59,7 @@ export const embedData = async (req, res) => {
                     return {
                         content: chunk.chunk,
                         metadata: chunk.metadata,
-                        embedding: embeddingRes.data[0].embedding
+                        embedding: embeddingRes[0]
                     };
                 } catch (embedError) {
                     console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
@@ -144,12 +144,10 @@ export const getReleventData = async(req,res) => {
         // const embededText = embedResponse.data[0].embedding;
         const embededText = co[0];
 
-        
+
         const relevantData = await searchSimilarData(title,embededText);
 
         const textForm = relevantData.map(data => data.content).join("\n");
-
-        return res.json({relevantData})
 
         const AiResponse = await askGemini(text,textForm)
 
