@@ -40,7 +40,7 @@ export const searchSimilarData = async (titleMatches,userInputVector) => {
             },
             {
                 $match: {
-                    score: { $gte: 0.7 }
+                    score: { $gte: 0.5 }
                 }
             },
             {
@@ -49,6 +49,7 @@ export const searchSimilarData = async (titleMatches,userInputVector) => {
         );
         
         const result = await Data.aggregate(pipeline);
+        console.log("data: ",result)
         console.log("=== END DEBUG ===");
         
         return result;
