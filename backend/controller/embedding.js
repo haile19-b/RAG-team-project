@@ -1,7 +1,8 @@
 import { VoyageAIClient } from "voyageai";
 import { Data } from "../model/data.model.js";
 import { searchSimilarData } from "../Functions/searchSimilarData.js";
-import { askGemini } from "../Functions/askGemini.js";
+import { askGemini } from "../Functions/askForLastResponse.js";
+import { ChunkFile } from "../Functions/askForChunking.js";
 
 const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
@@ -17,30 +18,85 @@ export const embedData = async (req,res)=>{
     }
 
     try {
-        const storedData = await Data.findOne({text:My_Data})
-        if(storedData){
+        // here I'm trying to I'm trying to prevent the dubilication of the data and this can help in improving performance !
+
+        // const storedData = await Data.findOne({text:My_Data})
+        // if(storedData){
+        //     return res.status(400).json({
+        //         message:"the same data stored on the database!",
+        //         success:false
+        //     })
+        // }
+
+        const chunks = await ChunkFile(My_Data)
+
+        if (chunks.error) {
             return res.status(400).json({
-                message:"the same data stored on the database!",
-                success:false
-            })
+                message: `Chunking failed: ${chunks.error}`,
+                status: false
+            });
         }
 
-        const embeddingResponse = await client.embed({
-            input: [My_Data],
-            model: 'voyage-3'
-        });
+        if (!chunks || chunks.length === 0) {
+    return res.status(400).json({
+        message: "No chunked data returned!",
+        status: false
+    });
+}
 
-        const embedding = embeddingResponse.data[0].embedding
+const embededChunks = await Promise.all(
+    chunks.map(async (chunk) => {
+        try {
+            const embeddingRes = await client.embed({
+                input: chunk.chunk,
+                model: "voyage-3-lite"
+            });
 
-        const embeddedData = await Data.create({
-            text:My_Data,
-            embedding
-        })
+            // ✅ ADD: Validate embedding response
+            if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
+                console.error("Invalid embedding response for chunk:", chunk.metadata.title);
+                return null;
+            }
 
-        return res.status(201).json({
-            message:"the text is embeddid successfully!",
-            embeddedData
-        })
+            return {
+                content: chunk.chunk,
+                metadata: chunk.metadata,
+                embedding: embeddingRes.data[0].embedding
+            };
+        } catch (embedError) {
+            console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
+            return null;
+        }
+    })
+);
+
+const successfulEmbeddings = embededChunks.filter(chunk => chunk !== null);
+
+if (successfulEmbeddings.length === 0) {
+    return res.status(500).json({
+        message: "All embedding operations failed",
+        status: false
+    });
+}
+
+
+const documents = successfulEmbeddings.map((chunk)=>({
+    content:chunk.content,
+    metadata:chunk.metadata,
+    embedding:chunk.embedding
+}))
+
+const bulkResult = await Data.insertMany(documents);
+
+return res.json({
+    message: "Chunks successfully processed and stored",
+    summary: {
+        totalReceived: chunks.length,
+        successfullyEmbedded: successfulEmbeddings.length,
+        successfullyStored: bulkResult.insertedCount,
+        failures: chunks.length - successfulEmbeddings.length
+    },
+});
 
     } catch (error) {
         return res.status(500).json({
