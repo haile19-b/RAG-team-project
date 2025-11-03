@@ -5,6 +5,7 @@ import { askGemini } from "../Functions/askForLastResponse.js";
 import { ChunkFile } from "../Functions/askForChunking.js";
 import { getTitle } from "../Functions/askForTitle.js";
 import { getCohereEmbedding } from "../Functions/cohere/askForEmbedding.js";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
 const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
@@ -19,32 +20,45 @@ export const embedData = async (req, res) => {
     }
 
     try {
-        // 1. First, get existing titles from database
-        const existingTitles = await Data.distinct("metadata.title");
+        // // 1. First, get existing titles from database
+        // const existingTitles = await Data.distinct("metadata.title");
+
+        // // 2. Chunk the data
+        // const chunks = await ChunkFile(existingTitles, My_Data);
+
+        // if (chunks.error) {
+        //     return res.status(400).json({
+        //         message: `Chunking failed: ${chunks.error}`,
+        //         status: false
+        //     });
+        // }
+
+        // if (!chunks || chunks.length === 0) {
+        //     return res.status(400).json({
+        //         message: "No chunked data returned!",
+        //         status: false
+        //     });
+        // }
+
 
         // 2. Chunk the data
-        const chunks = await ChunkFile(existingTitles, My_Data);
 
-        if (chunks.error) {
-            return res.status(400).json({
-                message: `Chunking failed: ${chunks.error}`,
-                status: false
-            });
-        }
+        const textSplitter = new RecursiveCharacterTextSplitter({
+            chunkSize: 500,
+            chunkOverlap: 80,
+            separators: ["\\n\\n", "\\n", " ", ".", "?", "!", ",", ";"],
+        });
 
-        if (!chunks || chunks.length === 0) {
-            return res.status(400).json({
-                message: "No chunked data returned!",
-                status: false
-            });
-        }
+        const chunks = await textSplitter.splitText(My_Data);
+
+
 
         // 3. Generate embeddings for chunks
         const embededChunks = await Promise.all(
             chunks.map(async (chunk,index) => {
                 try {
                     
-                    const embeddingRes = await getCohereEmbedding(chunk.chunk)
+                    const embeddingRes = await getCohereEmbedding(chunk)
 
                     // if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
                     //     console.error("Invalid embedding response for chunk:", chunk.metadata.title);
@@ -52,13 +66,12 @@ export const embedData = async (req, res) => {
                     // }
 
                     if (!embeddingRes || !embeddingRes[0] ) {
-                        console.error("Invalid embedding response for chunk:", chunk.metadata.title);
+                        console.error("Invalid embedding response for chunk:", chunk);
                         return null;
                     }
 
                     return {
-                        content: chunk.chunk,
-                        metadata: chunk.metadata,
+                        content: chunk,
                         embedding: embeddingRes[0]
                     };
                 } catch (embedError) {
@@ -77,11 +90,11 @@ export const embedData = async (req, res) => {
             });
         }
 
+
         // 4. Prepare documents for database insertion
         const documents = successfulEmbeddings.map((chunk) => {
             return {
                 content: chunk.content,
-                metadata: chunk.metadata,
                 embedding: chunk.embedding,
             };
         });
@@ -90,7 +103,6 @@ export const embedData = async (req, res) => {
         const bulkResult = await Data.insertMany(documents);
 
         // 6. Get updated titles list from database
-        const updatedTitles = await Data.distinct("metadata.title");
 
         return res.status(201).json({
             message: "Data successfully embedded and stored",
@@ -99,9 +111,7 @@ export const embedData = async (req, res) => {
                 successfullyEmbedded: successfulEmbeddings.length,
                 successfullyStored: bulkResult.insertedCount,
                 failures: chunks.length - successfulEmbeddings.length,
-                totalTitlesInDB: updatedTitles.length
             },
-            titles: updatedTitles
         });
 
     } catch (error) {
