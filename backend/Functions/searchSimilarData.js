@@ -1,6 +1,6 @@
 import { Data } from "../model/data.model.js"
 
-export const searchSimilarData = async (titleMatches,userInputVector) => {
+export const searchSimilarData = async (userInputVector) => {
     try {
         
         // Build the base pipeline
@@ -17,15 +17,6 @@ export const searchSimilarData = async (titleMatches,userInputVector) => {
             }
         };
 
-        // Add title filter to vector search if title matches provided
-        if (titleMatches && titleMatches.length > 0) {
-            vectorSearchStage.$vectorSearch.filter = {
-                "metadata.title": { 
-                    $in: titleMatches
-                }
-            };
-        }
-
         pipeline.push(vectorSearchStage);
 
         // Continue with existing pipeline stages
@@ -33,7 +24,6 @@ export const searchSimilarData = async (titleMatches,userInputVector) => {
             {
                 $project: {
                     content: 1,
-                    "metadata.title": 1,
                     _id: 1,
                     score: { $meta: "vectorSearchScore" }
                 }
@@ -49,8 +39,6 @@ export const searchSimilarData = async (titleMatches,userInputVector) => {
         );
         
         const result = await Data.aggregate(pipeline);
-        console.log("data: ",result)
-        console.log("=== END DEBUG ===");
         
         return result;
 
