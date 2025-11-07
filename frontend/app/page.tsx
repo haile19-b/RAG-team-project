@@ -70,7 +70,7 @@ function Page() {
 
       {isOnChat ? (
         <div className="flex flex-col items-center w-full max-w-5xl mx-auto mt-16 mb-24">
-          <h1 className="text-2xl font-bold mb-8">Haile's AI Assistant!</h1>
+          <h1 className="text-2xl font-bold mb-8">CSEC-ASTU's AI Assistant!</h1>
 
           <ScrollArea className="w-full h-[60vh] px-4">
             <div className="space-y-6">
@@ -117,9 +117,9 @@ function Page() {
         </div>
       ) : (
         <div className="flex flex-col gap-5 max-w-2xl items-center mb-10 mt-16">
-          <h2 className="text-3xl font-bold">👋 Hello! I'm Haile's AI Assistant</h2>
+          <h2 className="text-3xl font-bold">👋 Hello! I'm CSEC-ASTU's AI Assistant</h2>
           <p className="text-xl text-center text-gray-600 dark:text-gray-300">
-            Curious about <strong>Haile</strong>? Ask me anything — I'll tell you all you need to know.
+            Curious about <strong>CSEC-ASTU</strong>? Ask me anything — I'll tell you all you need to know.
           </p>
         </div>
       )}
