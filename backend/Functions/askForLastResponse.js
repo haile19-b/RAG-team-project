@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export const askGemini = async (userQuestion, filteredData) => {
+export const askGeminiStream = async (userQuestion, filteredData,res) => {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     try {
@@ -33,14 +33,30 @@ SPECIFIC RULES:
 
 Now, please provide a helpful response to the user's question:`;
 
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const aiResponse = response.text();
+        const result = await model.generateContentStream(prompt);
 
-        return aiResponse;
+        let fullResponse = '';
+        for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            fullResponse += chunkText;
+            
+            // Send each chunk to the client in SSE format
+            res.write(`data: ${JSON.stringify({ chunk: chunkText, done: false })}\n\n`);
+        }
+
+        // Send completion signal
+        res.write(`data: ${JSON.stringify({ chunk: '', done: true, fullResponse })}\n\n`);
+        // Important: Flush the response
+        if (typeof res.flush === 'function') {
+            res.flush();
+        }
+        res.end();
+
+        return fullResponse;
 
     } catch (error) {
         console.error("Gemini API error:", error);
-        return "I apologize, but I'm experiencing technical difficulties. Please try again shortly.";
+        res.write(`data: ${JSON.stringify({ error: "I apologize, but I'm experiencing technical difficulties. Please try again shortly.", done: true })}\n\n`);
+        res.end();
     }
 };
