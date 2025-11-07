@@ -1,6 +1,9 @@
 export const askAIStream = async (text: string, onChunk: (chunk: string) => void, onComplete: (fullText: string) => void) => {
+
+    const base_url = process.env.NEXT_PUBLIC_API_URL;
+
     return new Promise((resolve, reject) => {
-        const eventSource = new EventSource(`http://localhost:5000/embedding/get-data?text=${encodeURIComponent(text)}`);
+        const eventSource = new EventSource(`${base_url}/embedding/get-data?text=${encodeURIComponent(text)}`);
         let fullText = '';
 
         eventSource.onmessage = (event) => {
