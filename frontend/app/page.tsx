@@ -124,7 +124,9 @@ function Page() {
         </div>
       )}
 
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+      {/* Wrap the input and button in a form element */}
+      <form onSubmit={handleSubmit(sendRequest)}>
         <div className="flex bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
           <Input
             type="text"
@@ -134,7 +136,6 @@ function Page() {
             disabled={isSubmitting || isStreaming}
           />
           <Button
-            onClick={handleSubmit(sendRequest)}
             type="submit"
             size="icon"
             variant="outline"
@@ -144,10 +145,11 @@ function Page() {
             <ArrowUp />
           </Button>
         </div>
-        {errors.text && (
-          <p className="text-right text-red-400 font-sans mt-1">{errors.text.message}</p>
-        )}
-      </div>
+      </form>
+      {errors.text && (
+        <p className="text-right text-red-400 font-sans mt-1">{errors.text.message}</p>
+      )}
+    </div>
     </div>
   )
 }
