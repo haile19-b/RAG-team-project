@@ -9,7 +9,7 @@ export type ChatValues = z.infer<typeof UseChat>
 
 
 export const UseData = z.object({
-    data:z.string().min(1,"this field is requered!").max(1500,"data too long!")
+    data:z.string().min(1,"this field is requered!").max(2500,"data too long!")
 })
 
 export type DataValues = z.infer<typeof UseData>
