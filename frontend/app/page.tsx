@@ -1,193 +1,155 @@
 'use client'
+import { Input } from "@/components/ui/input"
+import Toggle from "./toggle-theme"
+import { Button } from "@/components/ui/button"
+import { useEffect, useRef, useState } from "react"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { ArrowUp } from "lucide-react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { ChatValues, UseChat } from "@/util/FormValidation"
+import { chatType } from "@/type"
+import { Skeleton } from "@/components/ui/skeleton"
+import { askAIStream } from "@/Requests/ai.response"
+import Typewriter from "typewriter-effect"
 
-import { askAI } from "@/Requests/ai.response";
-import { ChatValues, UseChat } from "@/util/FormValidation";
-import { zodResolver } from "@hookform/resolvers/zod";
-import Image from "next/image";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-
-interface ChatMessage extends ChatValues {
-  id: number;
-  isLoading?: boolean;
-  isError?: boolean;
-}
-
-export default function Home() {
-  const [chat, setChat] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      type: "ai",
-      text: "Hi! I'm your RAAG assistant. How can I help you today?"
-    }
-  ]);
-
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<ChatValues>({
+function Page() {
+  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm<ChatValues>({
     resolver: zodResolver(UseChat),
     defaultValues: {
-      text: "",
-      type: "user"
+      type: "user",
+      text: ""
     }
-  });
+  })
+
+  const [chat, setChat] = useState<chatType[]>([])
+  const [isOnChat, setIsOnChat] = useState(false)
+  const [currentStreamingText, setCurrentStreamingText] = useState("")
+  const [isStreaming, setIsStreaming] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [chat, currentStreamingText])
 
   const sendRequest = async (data: ChatValues) => {
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: Date.now(),
-      type: "user",
-      text: data.text
-    };
-    setChat(prev => [...prev, userMessage]);
-    reset();
+    setIsOnChat(true)
+    setChat(prev => [...prev, data])
+    setIsStreaming(true)
+    setCurrentStreamingText("")
+    reset()
 
     try {
-      // Add loading message
-      const loadingMessage: ChatMessage = {
-        id: Date.now() + 1,
-        type: "ai",
-        text: "Thinking...",
-        isLoading: true
-      };
-      setChat(prev => [...prev, loadingMessage]);
-
-      // Get AI response
-      const response = await askAI(data.text);
-      
-      // Remove loading and add AI response
-      setChat(prev => 
-        prev.filter(msg => !msg.isLoading).concat({
-          id: Date.now() + 2,
-          text: response.text,
-          type: "ai"
-        })
-      );
-
+      await askAIStream(
+        data.text,
+        // Called for each chunk
+        (chunk: string) => setCurrentStreamingText(prev => prev + chunk),
+        // Called when streaming completes
+        (fullText: string) => {
+          setChat(prev => [...prev, { type: "ai", text: fullText }])
+          setCurrentStreamingText("")
+          setIsStreaming(false)
+        }
+      )
     } catch (error) {
-      // Remove loading and show error
-      setChat(prev => 
-        prev.filter(msg => !msg.isLoading).concat({
-          id: Date.now() + 2,
-          type: "ai",
-          text: "Sorry, I encountered an error. Please try again.",
-          isError: true
-        })
-      );
-      console.error("AI request failed:", error);
+      console.error("Error:", error)
+      setChat(prev => [...prev, { type: "ai", text: "Sorry, I encountered an error. Please try again." }])
+      setIsStreaming(false)
     }
-  };
-
-  const clearChat = () => {
-    setChat([{
-      id: 1,
-      type: "ai",
-      text: "Hi! I'm your RAAG assistant. How can I help you today?"
-    }]);
-  };
+  }
 
   return (
-    <div className="w-full min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex justify-center items-center p-4">
-      <div className="w-full max-w-4xl h-full flex flex-col items-center">
-        
-        {/* Header with Logo */}
-        <div className="w-full flex justify-between items-center mb-6">
-          <div className="flex items-center gap-4">
-            <div className="rounded-full border-4 border-white shadow-lg">
-              <Image
-                src='/logo.png'
-                width={60}
-                height={60}
-                alt="RAAG AI Logo"
-                className="rounded-full"
-              />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">RAG AI Assistant</h1>
-              <p className="text-gray-600">Powered by your data</p>
-            </div>
-          </div>
-          <button
-            onClick={clearChat}
-            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-700 transition-colors"
-          >
-            Clear Chat
-          </button>
-        </div>
+    <div className="min-h-screen p-4 bg-white dark:bg-gray-900 flex flex-col items-center">
+      <div className="w-full flex justify-end fixed top-2 right-4">
+        <Toggle />
+      </div>
 
-        {/* Chat Container */}
-        <div className="w-full bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden flex flex-col h-[70vh]">
-          
-          {/* Messages Area */}
-          <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-            <div className="space-y-4">
-              {chat.map((message) => (
+      {isOnChat ? (
+        <div className="flex flex-col items-center w-full max-w-5xl mx-auto mt-16 mb-24">
+          <h1 className="text-2xl font-bold mb-8">Haile's AI Assistant!</h1>
+
+          <ScrollArea className="w-full h-[60vh] px-4">
+            <div className="space-y-6">
+              {chat.map((message, index) => (
                 <div
-                  key={message.id}
-                  className={`flex ${message.type === "ai" ? "justify-start" : "justify-end"}`}
+                  key={index}
+                  className={`rounded-3xl px-6 py-4 max-w-2xl w-fit ${
+                    message.type === "user"
+                      ? "bg-slate-100 dark:bg-slate-800 rounded-br-none ml-auto"
+                      : "bg-slate-200 dark:bg-slate-700 rounded-bl-none mr-auto"
+                  }`}
                 >
-                  <div
-                    className={`max-w-[80%] px-4 py-3 rounded-2xl ${
-                      message.isLoading
-                        ? "bg-gray-300 text-gray-600 animate-pulse"
-                        : message.isError
-                        ? "bg-red-100 text-red-800 border border-red-200"
-                        : message.type === "ai"
-                        ? "bg-gradient-to-r from-blue-500 to-purple-500 text-white"
-                        : "bg-gray-800 text-white"
-                    } ${
-                      message.type === "ai" ? "rounded-bl-none" : "rounded-br-none"
-                    } shadow-md`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap break-words">
-                      {message.text}
-                    </p>
-                    {message.isLoading && (
-                      <div className="flex space-x-1 mt-2">
-                        <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                        <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                      </div>
-                    )}
-                  </div>
+                  {message.type === "ai" ? (
+                    <Typewriter
+                      options={{
+                        strings: [message.text],
+                        autoStart: true,
+                        delay: 15,
+                        cursor: "",
+                        loop: false,
+                        deleteSpeed:Infinity
+                      }}
+                    />
+                  ) : (
+                    <p>{message.text}</p>
+                  )}
                 </div>
               ))}
-            </div>
-          </div>
 
-          {/* Input Area */}
-          <div className="border-t border-gray-200 bg-white p-4">
-            <form onSubmit={handleSubmit(sendRequest)} className="flex items-center gap-3">
-              <div className="flex-1">
-                <div className={`border-2 rounded-xl px-4 py-3 transition-all ${
-                  errors.text ? 'border-red-500 ring-2 ring-red-100' : 'border-gray-300 focus-within:border-purple-500 focus-within:ring-2 focus-within:ring-purple-100'
-                }`}>
-                  <input
-                    {...register('text')}
-                    type="text"
-                    placeholder="Ask me anything..."
-                    className="w-full outline-none bg-transparent text-gray-800 placeholder-gray-400 text-sm"
-                    disabled={isSubmitting}
-                  />
+              {/* Streaming response */}
+              {isStreaming && (
+                <div className="rounded-3xl px-6 py-4 max-w-2xl w-fit bg-slate-200 dark:bg-slate-700 rounded-bl-none mr-auto">
+                  {currentStreamingText ? (
+                    <p>{currentStreamingText}<span className="animate-pulse">|</span></p>
+                  ) : (
+                    <Skeleton className="h-[20px] w-[200px]" />
+                  )}
                 </div>
-                {errors.text && (
-                  <p className="text-red-500 text-xs mt-1 ml-1">{errors.text.message}</p>
-                )}
-              </div>
-              
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-3 rounded-xl hover:from-blue-600 hover:to-purple-600 disabled:from-gray-400 disabled:to-gray-500 transition-all shadow-lg hover:shadow-xl disabled:shadow-none disabled:cursor-not-allowed"
-              >
-                send
-              </button>
-            </form>
-            
-            <p className="text-xs text-gray-500 text-center mt-2">
-              RAAG AI • Ask questions based on your data
-            </p>
-          </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          </ScrollArea>
         </div>
+      ) : (
+        <div className="flex flex-col gap-5 max-w-2xl items-center mb-10 mt-16">
+          <h2 className="text-3xl font-bold">👋 Hello! I'm Haile's AI Assistant</h2>
+          <p className="text-xl text-center text-gray-600 dark:text-gray-300">
+            Curious about <strong>Haile</strong>? Ask me anything — I'll tell you all you need to know.
+          </p>
+        </div>
+      )}
+
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+        <div className="flex bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+          <Input
+            type="text"
+            {...register("text")}
+            placeholder="Ask me anything"
+            className="outline-0 border-0 flex-1"
+            disabled={isSubmitting || isStreaming}
+          />
+          <Button
+            onClick={handleSubmit(sendRequest)}
+            type="submit"
+            size="icon"
+            variant="outline"
+            className="border-0 border-l rounded-l-none"
+            disabled={isSubmitting || isStreaming}
+          >
+            <ArrowUp />
+          </Button>
+        </div>
+        {errors.text && (
+          <p className="text-right text-red-400 font-sans mt-1">{errors.text.message}</p>
+        )}
       </div>
     </div>
-  );
+  )
 }
+
+export default Page

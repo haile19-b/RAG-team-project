@@ -1,111 +1,99 @@
-import { VoyageAIClient } from "voyageai";
 import { Data } from "../model/data.model.js";
 import { searchSimilarData } from "../Functions/searchSimilarData.js";
-import { askGemini } from "../Functions/askForLastResponse.js";
-import { ChunkFile } from "../Functions/askForChunking.js";
+import { askGeminiStream } from "../Functions/askForLastResponse.js";
+import { getCohereEmbedding } from "../Functions/cohere/askForEmbedding.js";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
-const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
-export const embedData = async (req,res)=>{
+export const embedData = async (req, res) => {
+    const { My_Data } = req.body;
 
-    const {My_Data} = req.body;
-
-    if(!My_Data){
+    if (!My_Data) {
         return res.status(400).json({
-            message:"data is required !",
-            success:false
-        })
+            message: "Data is required!",
+            success: false
+        });
     }
 
     try {
-        // here I'm trying to I'm trying to prevent the dubilication of the data and this can help in improving performance !
 
-        // const storedData = await Data.findOne({text:My_Data})
-        // if(storedData){
-        //     return res.status(400).json({
-        //         message:"the same data stored on the database!",
-        //         success:false
-        //     })
-        // }
+        // 2. Chunk the data
 
-        const chunks = await ChunkFile(My_Data)
+        const textSplitter = new RecursiveCharacterTextSplitter({
+            chunkSize: 500,
+            chunkOverlap: 80,
+            separators: ["\\n\\n", "\\n", " ", ".", "?", "!", ",", ";"],
+        });
 
-        if (chunks.error) {
-            return res.status(400).json({
-                message: `Chunking failed: ${chunks.error}`,
+        const chunks = await textSplitter.splitText(My_Data);
+
+
+
+        // 3. Generate embeddings for chunks
+        const embededChunks = await Promise.all(
+            chunks.map(async (chunk,index) => {
+                try {
+                    
+                    const embeddingRes = await getCohereEmbedding(chunk)
+
+                    if (!embeddingRes || !embeddingRes[0] ) {
+                        console.error("Invalid embedding response for chunk:", chunk);
+                        return null;
+                    }
+
+                    return {
+                        content: chunk,
+                        embedding: embeddingRes[0]
+                    };
+                } catch (embedError) {
+                    console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
+                    return null;
+                }
+            })
+        );
+
+        const successfulEmbeddings = embededChunks.filter(chunk => chunk !== null);
+
+        if (successfulEmbeddings.length === 0) {
+            return res.status(500).json({
+                message: "All embedding operations failed",
                 status: false
             });
         }
 
-        if (!chunks || chunks.length === 0) {
-    return res.status(400).json({
-        message: "No chunked data returned!",
-        status: false
-    });
-}
 
-const embededChunks = await Promise.all(
-    chunks.map(async (chunk) => {
-        try {
-            const embeddingRes = await client.embed({
-                input: chunk.chunk,
-                model: "voyage-3-lite"
-            });
-
-            // ✅ ADD: Validate embedding response
-            if (!embeddingRes.data || !embeddingRes.data[0] || !embeddingRes.data[0].embedding) {
-                console.error("Invalid embedding response for chunk:", chunk.metadata.title);
-                return null;
-            }
-
+        // 4. Prepare documents for database insertion
+        const documents = successfulEmbeddings.map((chunk) => {
             return {
-                content: chunk.chunk,
-                metadata: chunk.metadata,
-                embedding: embeddingRes.data[0].embedding
+                content: chunk.content,
+                embedding: chunk.embedding,
             };
-        } catch (embedError) {
-            console.error(`Embedding failed for chunk "${chunk.metadata.title}":`, embedError);
-            return null;
-        }
-    })
-);
+        });
 
-const successfulEmbeddings = embededChunks.filter(chunk => chunk !== null);
+        // 5. Insert into database
+        const bulkResult = await Data.insertMany(documents);
 
-if (successfulEmbeddings.length === 0) {
-    return res.status(500).json({
-        message: "All embedding operations failed",
-        status: false
-    });
-}
+        // 6. Get updated titles list from database
 
-
-const documents = successfulEmbeddings.map((chunk)=>({
-    content:chunk.content,
-    metadata:chunk.metadata,
-    embedding:chunk.embedding
-}))
-
-const bulkResult = await Data.insertMany(documents);
-
-return res.json({
-    message: "Chunks successfully processed and stored",
-    summary: {
-        totalReceived: chunks.length,
-        successfullyEmbedded: successfulEmbeddings.length,
-        successfullyStored: bulkResult.insertedCount,
-        failures: chunks.length - successfulEmbeddings.length
-    },
-});
+        return res.status(201).json({
+            message: "Data successfully embedded and stored",
+            summary: {
+                totalReceived: chunks.length,
+                successfullyEmbedded: successfulEmbeddings.length,
+                successfullyStored: bulkResult.insertedCount,
+                failures: chunks.length - successfulEmbeddings.length,
+            },
+        });
 
     } catch (error) {
+        console.error("Server error in embedData:", error);
         return res.status(500).json({
-            message:"server error",
-            error:error.message,
-            success:false
-        })
+            message: "Server error",
+            error: error.message,
+            success: false
+        });
     }
-}
+};
 
 export const getReleventData = async(req,res) => {
 
@@ -116,34 +104,36 @@ export const getReleventData = async(req,res) => {
             success:false
         })
     }
+    const UserEmbededText = text
+
+    
 
     try {
-        const embedResponse = await client.embed({
-            input:[text],
-            model:'voyage-3'
-        })
 
-        const embededText = embedResponse.data[0].embedding;
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Content-Encoding': 'none'
+        });
+
+        const co = await getCohereEmbedding(text)
+
+        const embededText = co[0];
+
 
         const relevantData = await searchSimilarData(embededText);
 
-        const textForm = relevantData.map(data => data.text).join("\n");
+        const RelevantData = relevantData.map(data => data.content).join("\n");
 
-        const AiResponse = await askGemini(text,textForm)
+        const AiResponse = await askGeminiStream(UserEmbededText,RelevantData,res)
 
         return res.status(200).json({
             message:"response is successfully generated by gemini",
             userInput:text,
             aiResponse:AiResponse
         })
-
-        // return res.status(200).json({
-        //     message:"relevent data successfully filtered!",
-        //     data:relevantData,
-        //     combinedText:textForm
-        // })
-
-        
 
     } catch (error) {
         return res.status(500).json({

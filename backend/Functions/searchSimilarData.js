@@ -1,36 +1,50 @@
 import { Data } from "../model/data.model.js"
 
-export const searchSimilarData = async(userInputVector)=>{
+export const searchSimilarData = async (userInputVector) => {
     try {
-        const result = await Data.aggregate([
+        
+        // Build the base pipeline
+        const pipeline = [];
+        
+        // Vector search stage with optional title filtering
+        const vectorSearchStage = {
+            $vectorSearch: {
+                index: "vector_index",
+                path: "embedding", 
+                queryVector: userInputVector,
+                numCandidates: 100,
+                limit: 20
+            }
+        };
+
+        pipeline.push(vectorSearchStage);
+
+        // Continue with existing pipeline stages
+        pipeline.push(
             {
-                $vectorSearch:{
-                    index:"vector_index",
-                    path:"embedding",
-                    queryVector:userInputVector,
-                    numCandidates:100,
-                    limit:20
-                }
-            },
-            {
-                $project:{
-                    text:1,
-                    _id:1,
+                $project: {
+                    content: 1,
+                    _id: 1,
                     score: { $meta: "vectorSearchScore" }
                 }
             },
             {
-                $match:{
-                    score:{ $gte:0.7 }
+                $match: {
+                    score: { $gte: 0.5 }
                 }
             },
             {
-                $limit:5
+                $limit: 5
             }
-        ])
+        );
+        
+        const result = await Data.aggregate(pipeline);
+        
+        return result;
 
-        return result
     } catch (error) {
-        throw new Error(`Search failed: ${error.message}`);
+        console.log(`Search failed: ${error.message}`);
+        console.log("Full error:", error);
+        return [];
     }
 }
