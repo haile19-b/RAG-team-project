@@ -1,4 +1,3 @@
-import { DataValues } from "@/util/FormValidation";
 import axios from "axios";
 
 export const AddData = (data:string)=>{
