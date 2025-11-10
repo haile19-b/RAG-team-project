@@ -41,6 +41,6 @@ export const askAIStream = async (text: string, onChunk: (chunk: string) => void
         setTimeout(() => {
             eventSource.close();
             reject(new Error('Request timeout'));
-        }, 30000);
+        }, 120000);
     });
 };
